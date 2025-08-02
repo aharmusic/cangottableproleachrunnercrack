@@ -196,4 +196,5 @@ if __name__ == "__main__":
     application.add_handler(CommandHandler("proxy", proxy_command))
     
     print("Bot is polling...")
+
     application.run_polling()
