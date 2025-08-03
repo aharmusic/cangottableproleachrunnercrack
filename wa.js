@@ -4,7 +4,7 @@ const qrcode = require('qrcode');
 const fs = require('fs');
 
 // Replace with your Telegram Bot Token
-const token = '7608338596:AAGXVUnletVoq8ZdnrdtAK3ye21JFfAA4Hg';
+const token = '7659859177:AAHP8MkaFgQ9jJp1oM5vz5p98xYvdP3xKkI';
 const bot = new TelegramBot(token, { polling: true });
 
 // --- STATE MANAGEMENT ---
