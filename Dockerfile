@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y \
     libcairo2 \
     libcups2 \
     libdbus-1-3 \
+    libdrm2 \
+    # <--- ADDED THIS LINE
     libexpat1 \
     libfontconfig1 \
     libgcc1 \
@@ -50,16 +52,14 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # 4. Copy the package.json and package-lock.json files
-# This leverages Docker's layer caching to speed up future builds.
 COPY package*.json ./
 
 # 5. Install the application's dependencies
-# 'npm ci' is faster and more reliable for production builds.
 RUN npm ci --only=production
 
 # 6. Copy the rest of your application's code to the container
-# This includes your nodewa.js file and the .wwebjs_auth folder if you want to persist sessions.
 COPY . .
 
 # 7. Command to run the application
+# Make sure your main script is named 'wa.js'
 CMD ["node", "wa.js"]
