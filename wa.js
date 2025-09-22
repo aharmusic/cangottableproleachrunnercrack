@@ -3,7 +3,8 @@ const TelegramBot = require('node-telegram-bot-api');
 const qrcode = require('qrcode');
 const fs = require('fs');
 
-// Replace with your Telegram Bot Token
+// Recommended: keep token in env var instead of hardcoding
+// const token = process.env.TELEGRAM_BOT_TOKEN;
 const token = '7659859177:AAHP8MkaFgQ9jJp1oM5vz5p98xYvdP3xKkI';
 const bot = new TelegramBot(token, { polling: true });
 
@@ -30,10 +31,21 @@ function createClient(chatId) {
                 bot.sendMessage(chatId, 'Error generating QR code. Please try again.');
                 return;
             }
+
+            // convert data URL to Buffer
             const buffer = Buffer.from(url.split(',')[1], 'base64');
-            bot.sendPhoto(chatId, { source: buffer, filename: 'qrcode.png' }, {
-                caption: 'Scan this QR code with your phone to connect to WhatsApp.'
-            }).catch(e => console.error('Error sending QR code photo:', e));
+
+            // PASS the buffer as the first argument; provide filename in options
+            bot.sendPhoto(chatId, buffer, {
+                caption: 'Scan this QR code with your phone to connect to WhatsApp.',
+                filename: 'qrcode.png'
+            }).catch(e => {
+                console.error('Error sending QR code photo:', e);
+                // fallback: send as a file/document if sendPhoto fails
+                bot.sendDocument(chatId, buffer, {}, {
+                    filename: 'qrcode.png'
+                }).catch(err => console.error('Fallback sendDocument failed:', err));
+            });
         });
     });
 
@@ -44,30 +56,49 @@ function createClient(chatId) {
     });
 
     client.on('message', async (message) => {
-        const chat = await message.getChat();
-        const contact = await message.getContact();
-        const senderName = contact.pushname || contact.name || `+${contact.number}`;
-        const senderNumber = `+${contact.number}`;
-        const chatName = chat.isGroup ? ` in group "${chat.name}"` : '';
-        let caption = `*New message from ${senderName} (${senderNumber})${chatName}:*\n\n`;
+        try {
+            const chat = await message.getChat();
+            const contact = await message.getContact();
+            const senderName = contact.pushname || contact.name || `+${contact.number}`;
+            const senderNumber = `+${contact.number}`;
+            const chatName = chat.isGroup ? ` in group "${chat.name}"` : '';
+            let caption = `*New message from ${senderName} (${senderNumber})${chatName}:*\n\n`;
 
-        if (message.hasMedia) {
-            const media = await message.downloadMedia();
-            if (media) {
-                const mediaBuffer = Buffer.from(media.data, 'base64');
-                bot.sendPhoto(chatId, { source: mediaBuffer, filename: 'media.jpg' }, {
-                    caption: caption + (message.body || ''),
-                    parse_mode: 'Markdown'
-                }).then(sentMessage => {
+            if (message.hasMedia) {
+                const media = await message.downloadMedia();
+                if (media) {
+                    const mediaBuffer = Buffer.from(media.data, 'base64');
+
+                    // Send as photo (if image). If not image, you might want sendDocument instead.
+                    // Here we assume image/jpeg/png. If unsure, sendDocument is safer.
+                    bot.sendPhoto(chat.id || chatId, mediaBuffer, {
+                        caption: caption + (message.body || ''),
+                        parse_mode: 'Markdown',
+                        filename: 'media.jpg'
+                    }).then(sentMessage => {
+                        if (!clients[chatId].messageMap) clients[chatId].messageMap = new Map();
+                        clients[chatId].messageMap.set(sentMessage.message_id, message.from);
+                    }).catch(err => {
+                        // If sendPhoto fails (maybe not an image), try sendDocument
+                        console.warn('sendPhoto failed, trying sendDocument:', err && err.toString());
+                        bot.sendDocument(chat.id || chatId, mediaBuffer, {
+                            caption: caption + (message.body || ''),
+                            parse_mode: 'Markdown',
+                            filename: 'media.bin'
+                        }).then(sentMessage => {
+                            if (!clients[chatId].messageMap) clients[chatId].messageMap = new Map();
+                            clients[chatId].messageMap.set(sentMessage.message_id, message.from);
+                        }).catch(e => console.error('sendDocument fallback failed:', e));
+                    });
+                }
+            } else {
+                bot.sendMessage(chat.id || chatId, caption + (message.body || ''), { parse_mode: 'Markdown' }).then(sentMessage => {
                     if (!clients[chatId].messageMap) clients[chatId].messageMap = new Map();
                     clients[chatId].messageMap.set(sentMessage.message_id, message.from);
-                });
+                }).catch(e => console.error('Error sending text message to Telegram:', e));
             }
-        } else {
-            bot.sendMessage(chatId, caption + message.body, { parse_mode: 'Markdown' }).then(sentMessage => {
-                if (!clients[chatId].messageMap) clients[chatId].messageMap = new Map();
-                clients[chatId].messageMap.set(sentMessage.message_id, message.from);
-            });
+        } catch (err) {
+            console.error('Error in client.on("message") handler:', err);
         }
     });
 
@@ -116,7 +147,7 @@ bot.onText(/\/send (.+)/, (msg, match) => {
     }
 
     if (!/^\+?\d{10,15}$/.test(number)) {
-        return bot.sendMessage(chatId, 'Invalid number format. Please use the format: `/send +1234567890`');
+        return bot.sendMessage(chatId, 'Invalid number format. Please use the format: `/send +1234567890`', { parse_mode: 'Markdown' });
     }
 
     userState[chatId] = { action: 'awaiting_message', number: number };
@@ -152,23 +183,13 @@ This bot helps you connect your WhatsApp account and manage your chats directly 
 
 *Main Commands:*
 ➡️ */start*
-Displays the initial welcome message.
-
 ➡️ */scan*
-Generates a QR code to link your WhatsApp account.
-
 ➡️ */logout*
-Disconnects your WhatsApp account from the bot.
-
 ➡️ */help*
-Shows this help message.
 
 *Sending Messages:*
 ➡️ */send <number>*
-Starts the process of sending a message to a new WhatsApp number (e.g., \`/send +1234567890\`). The bot will then wait for you to send the content of the message.
-
 ➡️ */cancel*
-Aborts the */send* process if you change your mind.
 
 *How to Reply:*
 When you receive a forwarded message, use Telegram's 'Reply' feature on that message to send your response back to the original WhatsApp chat.
