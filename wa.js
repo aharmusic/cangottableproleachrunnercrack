@@ -8,13 +8,10 @@ const token = '7659859177:AAHP8MkaFgQ9jJp1oM5vz5p98xYvdP3xKkI';
 const bot = new TelegramBot(token, { polling: true });
 
 // --- STATE MANAGEMENT ---
-// Object to store whatsapp-web.js clients for each user
-const clients = {};
-// Object to track user states (e.g., if they are sending a new message)
-const userState = {};
+const clients = {};   // Store whatsapp-web.js clients per Telegram chat
+const userState = {}; // Track user state for /send
 
 // --- Helper Functions ---
-
 function createClient(chatId) {
     console.log(`Creating client for ${chatId}`);
     const client = new Client({
@@ -33,7 +30,8 @@ function createClient(chatId) {
                 bot.sendMessage(chatId, 'Error generating QR code. Please try again.');
                 return;
             }
-            bot.sendPhoto(chatId, Buffer.from(url.split(',')[1], 'base64'), {
+            const buffer = Buffer.from(url.split(',')[1], 'base64');
+            bot.sendPhoto(chatId, { source: buffer, filename: 'qrcode.png' }, {
                 caption: 'Scan this QR code with your phone to connect to WhatsApp.'
             }).catch(e => console.error('Error sending QR code photo:', e));
         });
@@ -57,7 +55,7 @@ function createClient(chatId) {
             const media = await message.downloadMedia();
             if (media) {
                 const mediaBuffer = Buffer.from(media.data, 'base64');
-                bot.sendPhoto(chatId, mediaBuffer, {
+                bot.sendPhoto(chatId, { source: mediaBuffer, filename: 'media.jpg' }, {
                     caption: caption + (message.body || ''),
                     parse_mode: 'Markdown'
                 }).then(sentMessage => {
@@ -86,9 +84,7 @@ function createClient(chatId) {
     client.initialize().catch(e => console.error(`Failed to initialize client for ${chatId}:`, e));
 }
 
-
 // --- Telegram Bot Commands ---
-
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     const startMessage = `
@@ -111,7 +107,6 @@ bot.onText(/\/scan/, (msg) => {
     }
 });
 
-// --- NEW FEATURE: /send command ---
 bot.onText(/\/send (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const number = match[1];
@@ -120,7 +115,6 @@ bot.onText(/\/send (.+)/, (msg, match) => {
         return bot.sendMessage(chatId, 'You must be connected to WhatsApp first. Use /scan.');
     }
 
-    // Basic number validation to ensure it looks like a phone number
     if (!/^\+?\d{10,15}$/.test(number)) {
         return bot.sendMessage(chatId, 'Invalid number format. Please use the format: `/send +1234567890`');
     }
@@ -129,7 +123,6 @@ bot.onText(/\/send (.+)/, (msg, match) => {
     bot.sendMessage(chatId, `Great! Now send the message (text or image) that you want to deliver to *${number}*.\n\nOr use /cancel to abort this action.`, { parse_mode: 'Markdown' });
 });
 
-// --- NEW FEATURE: /cancel command ---
 bot.onText(/\/cancel/, (msg) => {
     const chatId = msg.chat.id;
     if (userState[chatId]) {
@@ -139,7 +132,6 @@ bot.onText(/\/cancel/, (msg) => {
         bot.sendMessage(chatId, 'There is no ongoing operation to cancel.');
     }
 });
-
 
 bot.onText(/\/logout/, async (msg) => {
     const chatId = msg.chat.id;
@@ -151,7 +143,6 @@ bot.onText(/\/logout/, async (msg) => {
     }
 });
 
-// --- MODIFICATION: Updated /help command ---
 bot.onText(/\/help/, (msg) => {
     const chatId = msg.chat.id;
     const helpMessage = `
@@ -185,27 +176,19 @@ When you receive a forwarded message, use Telegram's 'Reply' feature on that mes
     bot.sendMessage(chatId, helpMessage.trim(), { parse_mode: 'Markdown' });
 });
 
-
-// --- Main Message Handler (for replies and new messages) ---
-
+// --- Main Message Handler ---
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
 
-    // Ignore commands so they are not processed by this handler
-    if (msg.text && msg.text.startsWith('/')) {
-        return;
-    }
+    if (msg.text && msg.text.startsWith('/')) return;
 
     const client = clients[chatId];
     if (!client) return;
 
-    // --- NEW: Logic to handle sending a new message ---
+    // Sending a new message
     if (userState[chatId] && userState[chatId].action === 'awaiting_message') {
         const number = userState[chatId].number;
-        // Format number to WhatsApp's internal ID
         const whatsappChatId = (number.startsWith('+') ? number.substring(1) : number) + "@c.us";
-
-        // Clear the user's state immediately to prevent accidental double-sends
         delete userState[chatId];
 
         try {
@@ -227,10 +210,10 @@ bot.on('message', async (msg) => {
             console.error(`Failed to send message to ${number}:`, error);
             bot.sendMessage(chatId, `❌ Failed to send message to *${number}*. Please make sure the number is correct and has an active WhatsApp account.`, { parse_mode: 'Markdown' });
         }
-        return; // Stop further processing
+        return;
     }
 
-    // --- EXISTING: Logic to handle replies ---
+    // Replying to a WhatsApp message
     if (msg.reply_to_message && client.messageMap) {
         const originalMessageId = msg.reply_to_message.message_id;
         const whatsappChatId = client.messageMap.get(originalMessageId);
